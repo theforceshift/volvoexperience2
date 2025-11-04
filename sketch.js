@@ -2,8 +2,11 @@
 let capture;
 let previousFrame;
 let grainBuffer;
-let bgBuffer; // Off-screen buffer for the background gradient
-let lightSources = []; // Objects for our moving gradient lights
+
+// --- Painterly Background Globals ---
+let paintLayer; // The off-screen canvas for the background painting
+let blueBrushes = []; // Brushes for the background
+let splashes = []; // For motion-triggered orange splashes
 
 // --- Interactivity Globals ---
 let presenceButton;
@@ -13,7 +16,6 @@ let font;
 let textPoints = []; 
 let textAnimation = { isAnimating: false, startTime: 0, duration: 3000 };
 let textGlowBuffer; 
-// buttonGlowBuffer is no longer needed for the new design
 
 // --- FONT SELECTION ---
 const FONT_PATH = 'Montserrat-Thin.ttf'; 
@@ -23,18 +25,19 @@ const sensitivity = 0.7;
 
 // --- PERFORMANCE CONTROLS ---
 const MOTION_DETECT_STEP = 4;
-const BG_DOWNSCALE_FACTOR = 8; 
 
-// --- GRADIENT BACKGROUND CONTROLS ---
-const NUM_LIGHTS = 4;
-const LIGHT_SPEED = 0.0002;
-const BG_BLUR_AMOUNT = 100;
+// --- PAINTERLY BACKGROUND CONTROLS ---
+const NUM_BLUE_BRUSHES = 4;
+const BRUSH_SPEED = 0.0005;
+const BRUSH_STROKE_DENSITY = 15;
+const BRUSH_STROKE_RADIUS = 30;
+const ORANGE_HUE = 30;
+const SPLASH_PARTICLE_COUNT = 80;
 
 // --- BUTTON CONTROL ---
 const BUTTON_VISIBILITY_TIMEOUT = 12000, BUTTON_SIZE = 80, BUTTON_FADE_SPEED = 0.05, MAX_HOLD_TIME = 3000; 
 const BUTTON_COOLDOWN_DURATION = 4000, BUTTON_GROW_SPEED = 0.2, BUTTON_GROW_FACTOR = 1.5;
-const BUTTON_DRAW_SPEED = 0.03; // How fast the stroke draws itself (0 to 1)
-const BUTTON_STROKE_WEIGHT = 2;
+const BUTTON_DRAW_SPEED = 0.04, BUTTON_STROKE_WEIGHT = 3;
 
 // --- TEXT & MESSAGE CONTROL ---
 const MESSAGES = ["Life is beautiful", "Dream bigger", "Stay curious", "Create your sunshine", "The future is bright", "Embrace the journey", "Choose joy", "Be present", "You are enough", "Invent your world"];
@@ -42,7 +45,7 @@ const TEXT_FONT_SIZE = 96, TEXT_OPACITY = 90, TEXT_BREATHING_MIN_SIZE = 6, TEXT_
 const TEXT_BREATHING_SPEED = 0.002, TEXT_ANIM_MIN_DURATION = 1500, TEXT_ANIM_MAX_DURATION = 4000, TEXT_GLOW_BLUR = 4;
 
 // --- VISUAL EFFECTS ---
-const GRAIN_AMOUNT = 0.2;
+const GRAIN_AMOUNT = 0.1;
 
 // --- Internal Tuning Parameters ---
 let motionSensitivityThreshold, activationThreshold;
@@ -57,7 +60,6 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 100);
   
-  // --- Motion Detection Setup ---
   motionSensitivityThreshold = map(sensitivity, 0, 1, 20, 70);
   activationThreshold = map(sensitivity, 0, 1, 50, 250);
   capture = createCapture(VIDEO);
@@ -72,16 +74,20 @@ function setup() {
 }
 
 function setupGraphics() {
-  // --- Background Setup ---
-  bgBuffer = createGraphics(width / BG_DOWNSCALE_FACTOR, height / BG_DOWNSCALE_FACTOR);
-  bgBuffer.colorMode(HSB, 360, 100, 100, 100);
-  bgBuffer.noStroke();
-  lightSources = [];
-  const colors = [ color(230, 80, 70), color(280, 60, 80), color(190, 70, 90), color(320, 50, 90) ];
-  for (let i = 0; i < NUM_LIGHTS; i++) {
-    lightSources.push({
-      noiseSeedX: random(1000), noiseSeedY: random(1000), color: random(colors),
-      radius: random(bgBuffer.width * 0.4, bgBuffer.width * 0.8)
+  // --- Painterly Layer Setup ---
+  paintLayer = createGraphics(width, height);
+  paintLayer.colorMode(HSB, 360, 100, 100, 100);
+  blueBrushes = [];
+  const bluePaintColors = [
+      color(190, 30, 85), // Desaturated Cyan
+      color(220, 40, 75), // Muted Blue
+      color(240, 35, 60)  // Deep Blue
+  ];
+  for (let i = 0; i < NUM_BLUE_BRUSHES; i++) {
+    blueBrushes.push({
+      pos: createVector(random(width), random(height)),
+      noiseSeedX: random(1000), noiseSeedY: random(1000),
+      color: random(bluePaintColors)
     });
   }
 
@@ -102,20 +108,84 @@ function draw() {
   if (motionEnergy > activationThreshold && now > lastMotionTriggerTime + MOTION_TRIGGER_COOLDOWN) {
     presenceButton.isVisible = true;
     presenceButton.lastActiveTime = now;
+    createSplash(); // Trigger the orange splash
     motionEnergy = 0;
     lastMotionTriggerTime = now;
   }
 
-  // --- MAIN RENDER PIPELINE ---
-  background(0);
-  drawBackground();
+  // --- RENDER PIPELINE ---
   
+  // 1. Update our persistent paint layer with both brushes and splashes
+  updateAndDrawBackgroundBrushes(paintLayer);
+  updateAndDrawSplashes(paintLayer);
+  
+  // 2. Draw the main canvas
+  background(0, 0, 95); // Off-white paper background
+  image(paintLayer, 0, 0); // Draw the painting on top
+  
+  // 3. Draw UI and effects
   updateButton();
   drawButton();
-  
   updateAndDrawText();
-  
   applyGrain();
+
+  // 4. Clean up dead splashes
+  splashes = splashes.filter(s => !s.isDead());
+}
+
+// ---- PAINTERLY BACKGROUND LOGIC ----
+function updateAndDrawBackgroundBrushes(pg) {
+  let time = millis() * BRUSH_SPEED;
+  for (const brush of blueBrushes) {
+    brush.pos.x = noise(brush.noiseSeedX + time) * width;
+    brush.pos.y = noise(brush.noiseSeedY + time) * height;
+    pg.noStroke();
+    pg.fill(hue(brush.color), saturation(brush.color), brightness(brush.color), 5);
+    for (let i = 0; i < BRUSH_STROKE_DENSITY; i++) {
+      const angle = random(TWO_PI);
+      const radius = random(BRUSH_STROKE_RADIUS);
+      const x = brush.pos.x + cos(angle) * radius;
+      const y = brush.pos.y + sin(angle) * radius;
+      pg.circle(x, y, random(2, 6));
+    }
+  }
+}
+
+function createSplash() {
+  const newSplash = {
+    pos: createVector(random(width), random(height)),
+    particles: [],
+    isDead: function() {
+      return this.particles.length > 0 && this.particles.every(p => p.lifespan <= 0);
+    }
+  };
+
+  for (let i = 0; i < SPLASH_PARTICLE_COUNT; i++) {
+    newSplash.particles.push({
+      pos: newSplash.pos.copy(),
+      vel: p5.Vector.random2D().mult(random(1, 5)),
+      lifespan: random(60, 120),
+      maxLifespan: 120
+    });
+  }
+  splashes.push(newSplash);
+}
+
+function updateAndDrawSplashes(pg) {
+  for (const splash of splashes) {
+    for (const p of splash.particles) {
+      if (p.lifespan > 0) {
+        p.pos.add(p.vel);
+        p.vel.mult(0.97); // Friction
+        p.lifespan--;
+        
+        const alpha = map(p.lifespan, 0, p.maxLifespan, 0, 15);
+        pg.noStroke();
+        pg.fill(ORANGE_HUE, 80, 100, alpha);
+        pg.circle(p.pos.x, p.pos.y, random(3, 8));
+      }
+    }
+  }
 }
 
 // --- MOUSE AND TOUCH INPUT ---
@@ -125,7 +195,6 @@ function touchStarted() { handlePress(); return false; }
 function touchEnded() { handleRelease(); return false; }
 
 function handlePress() {
-  // Only allow pressing if the button is visible, not on cooldown, and fully drawn.
   if (presenceButton.isVisible && !isHoldingButton && !presenceButton.isOnCooldown && presenceButton.isFullyDrawn) {
     let d = dist(mouseX, mouseY, presenceButton.pos.x, presenceButton.pos.y);
     if (d < presenceButton.currentSize / 2) {
@@ -145,20 +214,6 @@ function handleRelease() {
     presenceButton.isOnCooldown = true;
     presenceButton.cooldownStartTime = millis();
   }
-}
-
-// ---- DYNAMIC GRADIENT BACKGROUND ----
-function drawBackground() {
-  bgBuffer.background(240, 50, 5);
-  let time = millis() * LIGHT_SPEED;
-  for(const light of lightSources) {
-    let x = noise(light.noiseSeedX + time) * bgBuffer.width;
-    let y = noise(light.noiseSeedY + time) * bgBuffer.height;
-    bgBuffer.fill(light.color);
-    bgBuffer.circle(x, y, light.radius);
-  }
-  bgBuffer.drawingContext.filter = `blur(${BG_BLUR_AMOUNT / BG_DOWNSCALE_FACTOR}px)`;
-  image(bgBuffer, 0, 0, width, height);
 }
 
 // ---- TEXT ANIMATION FUNCTIONS ----
@@ -182,7 +237,7 @@ function updateAndDrawText() {
   }
   const pointsToDraw = floor(progress * textPoints.length);
   const time = millis() * TEXT_BREATHING_SPEED;
-  textGlowBuffer.noStroke(); textGlowBuffer.fill(0, 0, 100, TEXT_OPACITY); 
+  textGlowBuffer.noStroke(); textGlowBuffer.fill(0, 0, 0, TEXT_OPACITY);
   for (let i = 0; i < pointsToDraw; i++) {
     const p = textPoints[i];
     if (i > 0) { const prev = textPoints[i - 1]; if (dist(prev.x, prev.y, p.x, p.y) > TEXT_FONT_SIZE * 0.5) continue; }
@@ -204,7 +259,7 @@ function setupButton() {
     pos: createVector(width / 2, height * 3 / 4), size: BUTTON_SIZE, isVisible: false, lastActiveTime: 0,
     currentAlpha: 0, targetAlpha: 0, currentSize: BUTTON_SIZE, targetSize: BUTTON_SIZE,
     isOnCooldown: false, cooldownStartTime: 0,
-    drawProgress: 0, isFullyDrawn: false // New properties for animation
+    drawProgress: 0, isFullyDrawn: false
   };
 }
 
@@ -229,14 +284,12 @@ function updateButton() {
   presenceButton.currentAlpha = lerp(presenceButton.currentAlpha, presenceButton.targetAlpha, BUTTON_FADE_SPEED);
   presenceButton.currentSize = lerp(presenceButton.currentSize, presenceButton.targetSize, BUTTON_GROW_SPEED);
 
-  // Handle the drawing animation
   if (presenceButton.targetAlpha > 0 && !presenceButton.isFullyDrawn) {
     presenceButton.drawProgress = min(1, presenceButton.drawProgress + BUTTON_DRAW_SPEED);
     if (presenceButton.drawProgress >= 1) {
       presenceButton.isFullyDrawn = true;
     }
   } else if (presenceButton.targetAlpha === 0) {
-    // Reset when it fades out
     presenceButton.drawProgress = 0;
     presenceButton.isFullyDrawn = false;
   }
@@ -245,25 +298,19 @@ function updateButton() {
 function drawButton() {
   if (presenceButton.currentAlpha < 1) return;
   push();
-  
   let overallAlpha = presenceButton.currentAlpha;
   
-  // 1. Draw the animated stroke
   strokeWeight(BUTTON_STROKE_WEIGHT);
-  stroke(0, 0, 100, 80 * (overallAlpha / 100)); // White, 80% base opacity
+  stroke(0, 0, 0, 80 * (overallAlpha / 100)); 
   noFill();
-  
-  // arc(x, y, w, h, start, stop)
   let endAngle = -HALF_PI + presenceButton.drawProgress * TWO_PI;
   arc(presenceButton.pos.x, presenceButton.pos.y, presenceButton.currentSize, presenceButton.currentSize, -HALF_PI, endAngle);
   
-  // 2. Draw the faint fill only when the stroke is complete
   if (presenceButton.isFullyDrawn) {
     noStroke();
-    fill(0, 0, 100, 5 * (overallAlpha / 100)); // White, 5% base opacity
+    fill(0, 0, 0, 5 * (overallAlpha / 100));
     circle(presenceButton.pos.x, presenceButton.pos.y, presenceButton.currentSize);
   }
-  
   pop();
 }
 
@@ -271,18 +318,18 @@ function drawButton() {
 function createGrainTexture() {
     grainBuffer = createGraphics(width, height);
     let numParticles = (width * height / 100) * GRAIN_AMOUNT;
-    let alpha = 25;
+    let alpha = 15;
     grainBuffer.strokeWeight(1.5);
     for (let i = 0; i < numParticles; i++) {
         let x = random(width); let y = random(height);
-        grainBuffer.stroke(0, 0, random() > 0.5 ? 100 : 0, alpha);
+        grainBuffer.stroke(0, 0, 0, alpha);
         grainBuffer.point(x, y);
     }
 }
 function applyGrain() {
   if (GRAIN_AMOUNT <= 0) return;
   push();
-  blendMode(OVERLAY);
+  blendMode(MULTIPLY);
   tint(255, 50);
   image(grainBuffer, 0, 0);
   pop();
@@ -315,5 +362,6 @@ function windowResized() {
   setupGraphics();
   setupButton();
   textPoints = [];
+  splashes = [];
   textAnimation.isAnimating = false;
 }
