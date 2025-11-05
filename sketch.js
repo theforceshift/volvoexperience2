@@ -4,10 +4,17 @@ let previousFrame;
 let grainBuffer;
 
 // --- Painterly Background Globals ---
-let paintLayer; // The off-screen canvas for the background painting
-let blueBrushes = []; // Brushes for the background
-let splashes = []; // For motion-triggered orange splashes
-let backgroundColoar, splashColor; // To hold the specific colors
+let paintLayer;
+let activeEffects = []; 
+let backgroundColor;
+let strokeColorPalette = [];
+let dotBurstColorPalette = [];
+let bgBrushes = [];
+
+// --- Global Direction for Swarms ---
+let swarmDirection;
+let lastDirectionChangeTime = 0;
+const DIRECTION_CHANGE_INTERVAL = 30000; 
 
 // --- Interactivity Globals ---
 let presenceButton;
@@ -17,89 +24,151 @@ let font;
 let textPoints = [];
 let textAnimation = { isAnimating: false, startTime: 0, duration: 3000 };
 let textGlowBuffer;
+let textColor; 
+let mainSwarmsColor; 
+
+// --- Data from Google Sheet ---
+let messagesTable;
+let loadedMessages = []; 
+const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0mNWVCtB6splBEobm2KLRHdwadKP-yenf2by4QBT2CRQtosg4YvMTXwef8CWp3GVmksq3SLfV2GYG/pub?output=csv';
 
 // --- FONT SELECTION ---
-const FONT_PATH = 'Montserrat-Thin.ttf';
+const FONT_PATH = 'PlaywriteDKUloopet-Thin.ttf';
 
 // --- SENSITIVITY CONTROL ---
-const sensitivity = 0.7;
+const sensitivity = 1;
 
 // --- PERFORMANCE CONTROLS ---
-const MOTION_DETECT_STEP = 4;
+const MOTION_DETECT_STEP = 6;
 
 // --- PAINTERLY BACKGROUND CONTROLS ---
-const NUM_BLUE_BRUSHES = 4;
-const BRUSH_SPEED = 0.0005;
-const BRUSH_STROKE_DENSITY = 15;
-const BRUSH_STROKE_RADIUS = 60;
-const BACKGROUND_DECAY_ALPHA = 0.05; // NEW: Low value for slow decay, letting old strokes fade over ~120s.
-const BRUSH_TRAVEL_MARGIN = 0.2; // NEW: Allows brushes to travel 20% outside the canvas for better coverage.
+const NUM_BG_BRUSHES = 4;
+const BG_BRUSH_SPEED = 0.0005;
+const BG_STROKE_DENSITY = 15;
+const BG_STROKE_RADIUS = 60;
+const BACKGROUND_DECAY_ALPHA = 0.05;
+const BG_BRUSH_TRAVEL_MARGIN = 0.2;
 
-// --- SPLASH STYLE CONTROLS ---
-const splashStyles = ['BURST', 'FLOWER'];
-// Style 1: BURST (Classic explosion)
-const BURST_PARTICLE_COUNT = 30;
-const BURST_MIN_SPEED = 1,
-  BURST_MAX_SPEED = 5;
-// Style 2: FLOWER (5-petal burst)
-const FLOWER_PARTICLE_COUNT = 100;
+// --- EFFECT CONTROLS ---
+const EFFECT_TYPES = ['swarm', 'dotBurst', 'flowerBurst'];
+// Swarm Controls
+const SWARM_DRAW_DURATION = 1000, SWARM_HOLD_DURATION = 10000, SWARM_FADE_DURATION = 3000;
+const SWARM_TOTAL_LIFESPAN = SWARM_DRAW_DURATION + SWARM_HOLD_DURATION + SWARM_FADE_DURATION;
+const NUM_STROKES_IN_SWARM = 3, SWARM_SPREAD = 50, STROKE_SEGMENTS = 60;
+const STROKE_MIN_WEIGHT = 2, STROKE_MAX_WEIGHT = 16;
+const SWARM_MIN_DISTANCE = 150, SWARM_MAX_DISTANCE = 1800;
+// Dot & Flower Burst Common Lifespan
+const BURST_DRAW_DURATION = 500;
+const BURST_HOLD_DURATION = 10000;
+const BURST_FADE_DURATION = 3000;
+const BURST_TOTAL_LIFESPAN = BURST_DRAW_DURATION + BURST_HOLD_DURATION + BURST_FADE_DURATION;
+// Dot Burst Controls
+const DOT_BURST_COUNT = 25;
+const DOT_BURST_MIN_SPEED = 0.6;
+const DOT_BURST_MAX_SPEED = 5;
+const DOT_BURST_MIN_SIZE = 5;
+const DOT_BURST_MAX_SIZE = 15;
+// Flower Burst Controls
+const FLOWER_BURST_COUNT = 60;
 const FLOWER_PETAL_COUNT = 5;
-const FLOWER_MIN_SPEED = 1,
-  FLOWER_MAX_SPEED = 5;
-const FLOWER_PETAL_SPREAD = 0.5; // In radians, the width of each petal
+const FLOWER_PETAL_SPREAD = 0.4; 
+const FLOWER_BURST_MIN_SPEED = 0.5;
+const FLOWER_BURST_MAX_SPEED = 2.0;
+const FLOWER_BURST_MIN_SIZE = 4;
+const FLOWER_BURST_MAX_SIZE = 12;
 
 // --- BUTTON CONTROL ---
-const BUTTON_VISIBILITY_TIMEOUT = 12000,
-  BUTTON_SIZE = 80,
-  BUTTON_FADE_SPEED = 0.05,
-  MAX_HOLD_TIME = 3000;
-const BUTTON_COOLDOWN_DURATION = 4000,
-  BUTTON_GROW_SPEED = 0.2,
-  BUTTON_GROW_FACTOR = 1.5;
-const BUTTON_DRAW_SPEED = 0.04,
-  BUTTON_STROKE_WEIGHT = 3;
+const BUTTON_VISIBILITY_TIMEOUT = 12000, BUTTON_SIZE = 80, BUTTON_FADE_SPEED = 0.05, MAX_HOLD_TIME = 3000;
+const BUTTON_COOLDOWN_DURATION = 4000, BUTTON_GROW_SPEED = 0.2, BUTTON_GROW_FACTOR = 1.5;
+const BUTTON_DRAW_SPEED = 0.04, BUTTON_STROKE_WEIGHT = 3;
 
 // --- TEXT & MESSAGE CONTROL ---
-const MESSAGES = ["Life is beautiful", "Dream bigger", "Stay curious", "Create your sunshine", "The future is bright", "Embrace the journey", "Choose joy", "Be present", "You are enough", "Invent your world"];
-const TEXT_FONT_SIZE = 96,
-  TEXT_OPACITY = 90,
-  TEXT_BREATHING_MIN_SIZE = 6,
-  TEXT_BREATHING_MAX_SIZE = 10;
-const TEXT_BREATHING_SPEED = 0.002,
-  TEXT_ANIM_MIN_DURATION = 1500,
-  TEXT_ANIM_MAX_DURATION = 4000,
-  TEXT_GLOW_BLUR = 4;
+const TEXT_FONT_SIZE = 96, TEXT_OPACITY = 100;
+const TEXT_BREATHING_MIN_SIZE = 6, TEXT_BREATHING_MAX_SIZE = 10;
+const TEXT_BREATHING_SPEED = 0.002, TEXT_ANIM_MIN_DURATION = 1500, TEXT_ANIM_MAX_DURATION = 4000;
 
 // --- VISUAL EFFECTS ---
-const GRAIN_AMOUNT = 0.1;
+const GRAIN_AMOUNT = 0;
 
 // --- Internal Tuning Parameters ---
 let motionSensitivityThreshold, activationThreshold;
-let motionEnergy = 0,
-  lastMotionTriggerTime = 0;
+let motionEnergy = 0, lastMotionTriggerTime = 0;
 const MOTION_TRIGGER_COOLDOWN = 1000;
+
+
+// --- EMBEDDED P5.BRUSH LIBRARY LOGIC ---
+(function() {
+  p5.prototype.brush = {
+    _styles: {}, _current: null, _color: { h: 0, s: 0, v: 0, a: 255 }, _weight: 1,
+  };
+  p5.prototype.brush.define = function(name, options) { this._styles[name] = options; };
+  p5.prototype.brush.set = function(name) {
+    if (!this._styles[name]) throw `Brush "${name}" not found!`;
+    this._current = this._styles[name];
+  };
+  p5.prototype.brush.stroke = function(h, s, v, a) {
+    let c = this._color;
+    if (h instanceof p5.Color) {
+      c.h = hue(h); c.s = saturation(h); c.v = brightness(h);
+      c.a = s === undefined ? 100 : s; 
+    } else { c.h = h; c.s = s; c.v = v; c.a = a; }
+  };
+  p5.prototype.brush.strokeWeight = function(weight) { this._weight = weight; };
+  p5.prototype.brush.line = function(x1, y1, x2, y2, pg) {
+    let target = pg || window;
+    if (!this._current) return;
+    let d = dist(x1, y1, x2, y2); let s = this._current.spacing * this._weight;
+    let steps = Math.max(1, Math.round(d / s));
+    for (let i = 0; i < steps; i++) {
+      let t = i / steps;
+      this._drawBrush(lerp(x1, x2, t), lerp(y1, y2, t), this._weight, target);
+    }
+  };
+  p5.prototype.brush._drawBrush = function(x, y, w, target) {
+    for (let i = 0; i < this._current.layers.length; i++) {
+      let layer = this._current.layers[i];
+      if (layer.mode) target.blendMode(layer.mode);
+      let c = layer.color || this._color;
+      let alpha = this._color.a === undefined ? 100 : this._color.a;
+      target.fill(c.h, c.s, c.v, (layer.flow / 100) * alpha);
+      target.noStroke();
+      for (let j = 0; j < layer.strokes; j++) {
+        let sx = x + (randomGaussian() * layer.jitter * w);
+        let sy = y + (randomGaussian() * layer.jitter * w);
+        let sw = max(0.1, w + (randomGaussian() * layer.scale * w));
+        target.circle(sx, sy, sw);
+      }
+    }
+  };
+})();
+// --- END OF EMBEDDED LIBRARY ---
 
 function preload() {
   font = loadFont(FONT_PATH);
+  messagesTable = loadTable(SPREADSHEET_URL, 'csv');
 }
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 100);
 
+  if (messagesTable) {
+    for (let r = 0; r < messagesTable.getRowCount(); r++) {
+      const msg = messagesTable.getString(r, 0); 
+      if (msg && msg.trim() !== '') { 
+        loadedMessages.push(msg.trim());
+      }
+    }
+  }
+  if (loadedMessages.length === 0) {
+    loadedMessages.push("Stay curious"); 
+    console.warn("Could not load messages from spreadsheet or it was empty. Using default message.");
+  }
+
   motionSensitivityThreshold = map(sensitivity, 0, 1, 20, 70);
   activationThreshold = map(sensitivity, 0, 1, 50, 250);
 
-  let constraints = {
-    video: {
-      width: {
-        ideal: 160
-      },
-      height: {
-        ideal: 120
-      }
-    }
-  };
+  let constraints = { video: { width: { ideal: 160 }, height: { ideal: 120 } } };
   capture = createCapture(constraints);
   capture.hide();
 
@@ -107,6 +176,13 @@ function setup() {
   previousFrame.pixelDensity(1);
 
   setupGraphics();
+
+  brush.define('performanceStroke', {
+    spacing: 0.2, 
+    layers: [{ strokes: 10, jitter: 0.05, scale: 0.25, flow: 25 }]
+  });
+  
+  updateSwarmDirection();
   setupButton();
   textFont(font);
 }
@@ -114,18 +190,31 @@ function setup() {
 function setupGraphics() {
   paintLayer = createGraphics(width, height);
   paintLayer.colorMode(HSB, 360, 100, 100, 100);
-
+  
   backgroundColor = color('#F7F2EE');
-  splashColor = color('#FF5017');
-  const bluePaintColors = [color('#CBEB6A'), color('#062DEC')];
+  
+  mainSwarmsColor = color('#FF5017');
+  const secondColor = color('#062DEC');
+  const otherColors = [
+      color(45, 80, 100), color(340, 70, 100), color(260, 75, 100),
+      color(190, 80, 100), color(170, 70, 90), color(320, 70, 90)
+  ];
+  
+  strokeColorPalette = [];
+  for (let i = 0; i < 5; i++) { strokeColorPalette.push(mainSwarmsColor); }
+  for (let i = 0; i < 3; i++) { strokeColorPalette.push(secondColor); }
+  for (const c of otherColors) { strokeColorPalette.push(c); }
 
-  blueBrushes = [];
-  for (let i = 0; i < NUM_BLUE_BRUSHES; i++) {
-    blueBrushes.push({
+  dotBurstColorPalette = [mainSwarmsColor, secondColor, ...otherColors];
+  textColor = color(0, 0, 100); 
+  
+  const bgPaintColors = [color('#CBEB6A'), color('#062DEC')];
+  bgBrushes = [];
+  for (let i = 0; i < NUM_BG_BRUSHES; i++) {
+    bgBrushes.push({
       pos: createVector(random(width), random(height)),
-      noiseSeedX: random(1000),
-      noiseSeedY: random(1000),
-      color: random(bluePaintColors)
+      noiseSeedX: random(1000), noiseSeedY: random(1000),
+      color: bgPaintColors[i % bgPaintColors.length]
     });
   }
 
@@ -145,173 +234,240 @@ function draw() {
   if (motionEnergy > activationThreshold && now > lastMotionTriggerTime + MOTION_TRIGGER_COOLDOWN) {
     presenceButton.isVisible = true;
     presenceButton.lastActiveTime = now;
-    createSplash();
+    
+    if (now - lastDirectionChangeTime > DIRECTION_CHANGE_INTERVAL) {
+        updateSwarmDirection();
+    }
+    
+    createEffect();
     motionEnergy = 0;
     lastMotionTriggerTime = now;
   }
 
-  // --- Apply a slow decay to the paint layer to allow for new forms ---
   paintLayer.noStroke();
   paintLayer.fill(hue(backgroundColor), saturation(backgroundColor), brightness(backgroundColor), BACKGROUND_DECAY_ALPHA);
   paintLayer.rect(0, 0, width, height);
-
   updateAndDrawBackgroundBrushes(paintLayer);
-  updateAndDrawSplashes(paintLayer);
 
   background(backgroundColor);
   image(paintLayer, 0, 0);
+
+  updateAndDrawEffects();
 
   updateButton();
   drawButton();
   updateAndDrawText();
   applyGrain();
 
-  splashes = splashes.filter(s => !s.isDead());
+  activeEffects = activeEffects.filter(e => !e.isDead());
 }
 
-// ---- PAINTERLY BACKGROUND LOGIC ----
 function updateAndDrawBackgroundBrushes(pg) {
-  let time = millis() * BRUSH_SPEED;
-  const marginX = width * BRUSH_TRAVEL_MARGIN;
-  const marginY = height * BRUSH_TRAVEL_MARGIN;
-
-  for (const brush of blueBrushes) {
-    // Map noise to a wider area to ensure full canvas coverage
-    brush.pos.x = map(noise(brush.noiseSeedX + time), 0, 1, -marginX, width + marginX);
-    brush.pos.y = map(noise(brush.noiseSeedY + time), 0, 1, -marginY, height + marginY);
-
+  let time = millis() * BG_BRUSH_SPEED;
+  for (const brush of bgBrushes) {
+    brush.pos.x = map(noise(brush.noiseSeedX + time), 0, 1, -width*BG_BRUSH_TRAVEL_MARGIN, width*(1+BG_BRUSH_TRAVEL_MARGIN));
+    brush.pos.y = map(noise(brush.noiseSeedY + time), 0, 1, -height*BG_BRUSH_TRAVEL_MARGIN, height*(1+BG_BRUSH_TRAVEL_MARGIN));
     pg.noStroke();
     pg.fill(hue(brush.color), saturation(brush.color), brightness(brush.color), 5);
-    for (let i = 0; i < BRUSH_STROKE_DENSITY; i++) {
-      const angle = random(TWO_PI);
-      const radius = random(BRUSH_STROKE_RADIUS);
-      const x = brush.pos.x + cos(angle) * radius;
-      const y = brush.pos.y + sin(angle) * radius;
-      pg.circle(x, y, random(2, 6));
+    for (let i = 0; i < BG_STROKE_DENSITY; i++) {
+      pg.circle(brush.pos.x + random(-BG_STROKE_RADIUS, BG_STROKE_RADIUS), brush.pos.y + random(-BG_STROKE_RADIUS, BG_STROKE_RADIUS), random(2, 6));
     }
   }
 }
 
-// ---- DYNAMIC SPLASH LOGIC ----
+// ---- EFFECT LOGIC ----
 
-// Master function to choose and create a splash style
-function createSplash() {
-  const style = random(splashStyles);
-  let newSplash;
-
-  switch (style) {
-    case 'BURST':
-      newSplash = createBurstSplash();
-      break;
-    case 'FLOWER':
-      newSplash = createFlowerSplash();
-      break;
-    default:
-      newSplash = createBurstSplash();
-  }
-  splashes.push(newSplash);
+function updateSwarmDirection() {
+    swarmDirection = p5.Vector.random2D();
+    lastDirectionChangeTime = millis();
 }
 
-// Splash Style Creation Functions
-function createBurstSplash() {
-  const splash = {
-    pos: createVector(random(width), random(height)),
-    particles: [],
-    style: 'BURST',
-    isDead: function() {
-      return this.particles.length > 0 && this.particles.every(p => p.lifespan <= 0);
+function createEffect() {
+    if (random(1) < 0.7) {
+        createStrokeSwarm();
+    } else {
+        if (random(1) < 0.5) {
+            createDotBurst();
+        } else {
+            createFlowerBurst();
+        }
     }
+}
+
+function createStrokeSwarm() {
+  const swarm = {
+    type: 'swarm', strokes: [], buffer: createGraphics(width, height),
+    creationTime: millis(), isRendered: false, isMainColorSwarm: false,
+    isDead: function() { return millis() > this.creationTime + SWARM_TOTAL_LIFESPAN; }
   };
-  for (let i = 0; i < BURST_PARTICLE_COUNT; i++) {
-    splash.particles.push({
-      pos: splash.pos.copy(),
-      vel: p5.Vector.random2D().mult(random(BURST_MIN_SPEED, BURST_MAX_SPEED)),
-      lifespan: random(60, 120),
-      maxLifespan: 120
-    });
-  }
-  return splash;
-}
+  swarm.buffer.colorMode(HSB, 360, 100, 100, 100);
+  swarm.buffer.noStroke();
 
-function createFlowerSplash() {
-  const splash = {
-    pos: createVector(random(width * 0.2, width * 0.8), random(height * 0.2, height * 0.8)),
-    particles: [],
-    style: 'FLOWER',
-    isDead: function() {
-      return this.particles.length > 0 && this.particles.every(p => p.lifespan <= 0);
+  const start = createVector(random(width), random(height));
+  const travelDistance = random(SWARM_MIN_DISTANCE, SWARM_MAX_DISTANCE);
+  const travelVector = swarmDirection.copy().mult(travelDistance);
+  const end = p5.Vector.add(start, travelVector);
+  const perpDirection = swarmDirection.copy().rotate(HALF_PI);
+  const curveAmount = travelDistance * random(0.2, 0.5) * random([-1, 1]);
+  const midPoint = p5.Vector.lerp(start, end, 0.5);
+  const cp1 = p5.Vector.lerp(start, midPoint, 0.5).add(perpDirection.copy().mult(curveAmount));
+  const cp2 = p5.Vector.lerp(midPoint, end, 0.5).add(perpDirection.copy().mult(curveAmount));
+
+  for (let i = 0; i < NUM_STROKES_IN_SWARM; i++) {
+    const path = []; const weights = [];
+    const offsetNoiseSeed = random(3000);
+    const lengthMultiplier = random(0.6, 1.0);
+    const strokeColor = random(strokeColorPalette);
+    if (strokeColor === mainSwarmsColor) { swarm.isMainColorSwarm = true; }
+
+    for (let t = 0; t <= 1; t += 1/STROKE_SEGMENTS) {
+      const leaderX = bezierPoint(start.x, cp1.x, cp2.x, end.x, t);
+      const leaderY = bezierPoint(start.y, cp1.y, cp2.y, end.y, t);
+      const tx = bezierTangent(start.x, cp1.x, cp2.x, end.x, t);
+      const ty = bezierTangent(start.y, cp1.y, cp2.y, end.y, t);
+      const normalAngle = atan2(ty, tx) + HALF_PI;
+      const offset = (noise(offsetNoiseSeed + i*10, t*2) - 0.5) * 2 * SWARM_SPREAD;
+      path.push(createVector(leaderX + cos(normalAngle)*offset, leaderY + sin(normalAngle)*offset));
+      const taperShape = sin(t*PI);
+      weights.push(map(taperShape, 0, 1, STROKE_MIN_WEIGHT, STROKE_MAX_WEIGHT));
     }
-  };
-  const angleStep = TWO_PI / FLOWER_PETAL_COUNT;
-  for (let i = 0; i < FLOWER_PARTICLE_COUNT; i++) {
-    const petalIndex = i % FLOWER_PETAL_COUNT;
-    const centerAngle = petalIndex * angleStep;
-
-    const angle = centerAngle + random(-FLOWER_PETAL_SPREAD, FLOWER_PETAL_SPREAD);
-
-    // Make particles in the center of the petal faster
-    const distFromCenter = abs(angle - centerAngle);
-    const speedMultiplier = map(distFromCenter, 0, FLOWER_PETAL_SPREAD, 1, 0.4);
-    const speed = random(FLOWER_MIN_SPEED, FLOWER_MAX_SPEED) * speedMultiplier;
-
-    splash.particles.push({
-      pos: splash.pos.copy(),
-      vel: p5.Vector.fromAngle(angle).mult(speed),
-      lifespan: random(80, 140),
-      maxLifespan: 140
-    });
+    swarm.strokes.push({ path: path, weights: weights, color: strokeColor, lengthMultiplier: lengthMultiplier });
   }
-  return splash;
+  activeEffects.push(swarm);
+}
+
+function createDotBurst() {
+    const burst = {
+        type: 'dotBurst', particles: [], buffer: createGraphics(width, height),
+        creationTime: millis(), isRendered: false, isMainColorSwarm: false,
+        isDead: function() { return millis() > this.creationTime + BURST_TOTAL_LIFESPAN; }
+    };
+    burst.buffer.colorMode(HSB, 360, 100, 100, 100);
+    const center = createVector(random(width), random(height));
+    for (let i = 0; i < DOT_BURST_COUNT; i++) {
+        burst.particles.push({
+            pos: center.copy(),
+            vel: p5.Vector.random2D().mult(random(DOT_BURST_MIN_SPEED, DOT_BURST_MAX_SPEED)),
+            size: random(DOT_BURST_MIN_SIZE, DOT_BURST_MAX_SIZE),
+            color: random(dotBurstColorPalette)
+        });
+    }
+    activeEffects.push(burst);
+}
+
+function createFlowerBurst() {
+    const burst = {
+        type: 'flowerBurst', particles: [], buffer: createGraphics(width, height),
+        creationTime: millis(), isRendered: false, isMainColorSwarm: false,
+        isDead: function() { return millis() > this.creationTime + BURST_TOTAL_LIFESPAN; }
+    };
+    burst.buffer.colorMode(HSB, 360, 100, 100, 100);
+    const center = createVector(random(width), random(height));
+    for (let i = 0; i < FLOWER_BURST_COUNT; i++) {
+        const petalIndex = i % FLOWER_PETAL_COUNT;
+        const centerAngle = petalIndex * (TWO_PI / FLOWER_PETAL_COUNT);
+        const angle = centerAngle + random(-FLOWER_PETAL_SPREAD, FLOWER_PETAL_SPREAD);
+        const speed = random(FLOWER_BURST_MIN_SPEED, FLOWER_BURST_MAX_SPEED);
+        burst.particles.push({
+            pos: center.copy(),
+            vel: p5.Vector.fromAngle(angle).mult(speed),
+            size: random(FLOWER_BURST_MIN_SIZE, FLOWER_BURST_MAX_SIZE),
+            color: random(dotBurstColorPalette)
+        });
+    }
+    activeEffects.push(burst);
 }
 
 
-// Universal update and draw function for all splash styles
-function updateAndDrawSplashes(pg) {
-  for (const splash of splashes) {
-    for (const p of splash.particles) {
-      if (p.lifespan > 0) {
+function updateAndDrawEffects() {
+  noStroke();
+  activeEffects.sort((a, b) => a.isMainColorSwarm - b.isMainColorSwarm);
+  for (const effect of activeEffects) {
+    switch(effect.type) {
+      case 'swarm': updateAndDrawSwarm(effect); break;
+      case 'dotBurst': updateAndDrawBurst(effect); break;
+      case 'flowerBurst': updateAndDrawBurst(effect); break;
+    }
+  }
+  blendMode(BLEND);
+}
 
-        // --- COMMON PHYSICS & DRAWING ---
-        p.pos.add(p.vel);
-        p.vel.mult(0.97); // Friction
-        p.lifespan--;
-
-        const alpha = map(p.lifespan, 0, p.maxLifespan, 0, 15);
-        pg.noStroke();
-        pg.fill(hue(splashColor), saturation(splashColor), brightness(splashColor), alpha);
-        pg.circle(p.pos.x, p.pos.y, random(3, 8));
+function updateAndDrawSwarm(swarm) {
+    const age = millis() - swarm.creationTime;
+    let alpha = 100;
+    
+    if (age < SWARM_DRAW_DURATION && !swarm.isRendered) {
+      let drawProgress = easeOutCubic(age / SWARM_DRAW_DURATION);
+      swarm.buffer.clear();
+      brush.set('performanceStroke');
+      for (const stroke of swarm.strokes) {
+        const maxPointsForThisStroke = floor(stroke.path.length * stroke.lengthMultiplier);
+        const pointsToDraw = floor(maxPointsForThisStroke * drawProgress);
+        if (pointsToDraw < 2) continue;
+        const c = stroke.color;
+        brush.stroke(hue(c), saturation(c), brightness(c), 100);
+        for (let i = 1; i < pointsToDraw; i++) {
+          const p1 = stroke.path[i-1]; const p2 = stroke.path[i];
+          const avgWeight = (stroke.weights[i-1] + stroke.weights[i]) / 2;
+          brush.strokeWeight(avgWeight);
+          brush.line(p1.x, p1.y, p2.x, p2.y, swarm.buffer);
+        }
       }
+      if (drawProgress >= 1.0) { swarm.isRendered = true; }
     }
-  }
+    
+    if (age > SWARM_DRAW_DURATION + SWARM_HOLD_DURATION) {
+      alpha = map(age, SWARM_DRAW_DURATION + SWARM_HOLD_DURATION, SWARM_TOTAL_LIFESPAN, 100, 0);
+    }
+    if (alpha <= 0) return;
+
+    push();
+    tint(255, alpha);
+    image(swarm.buffer, 0, 0);
+    pop();
 }
+
+function updateAndDrawBurst(burst) {
+    const age = millis() - burst.creationTime;
+    let alpha = 100;
+    
+    if (age < BURST_DRAW_DURATION && !burst.isRendered) {
+        burst.buffer.clear();
+        brush.set('performanceStroke');
+        for (let p of burst.particles) {
+            let currentPos = p5.Vector.add(p.pos, p5.Vector.mult(p.vel, age * 0.05));
+            const c = p.color;
+            brush.stroke(hue(c), saturation(c), brightness(c), 100);
+            brush.strokeWeight(p.size);
+            brush.line(currentPos.x, currentPos.y, currentPos.x, currentPos.y, burst.buffer);
+        }
+        if (age >= BURST_DRAW_DURATION) { burst.isRendered = true; }
+    }
+
+    if (age > BURST_DRAW_DURATION + BURST_HOLD_DURATION) {
+        alpha = map(age, BURST_DRAW_DURATION + BURST_HOLD_DURATION, BURST_TOTAL_LIFESPAN, 100, 0);
+    }
+    if (alpha <= 0) return;
+
+    push();
+    tint(255, alpha);
+    image(burst.buffer, 0, 0);
+    pop();
+}
+
+function easeOutCubic(x) { return 1 - pow(1 - x, 3); }
 
 // --- MOUSE AND TOUCH INPUT ---
-function mousePressed() {
-  handlePress();
-}
-
-function mouseReleased() {
-  handleRelease();
-}
-
-function touchStarted() {
-  handlePress();
-  return false;
-}
-
-function touchEnded() {
-  handleRelease();
-  return false;
-}
+function mousePressed() { handlePress(); }
+function mouseReleased() { handleRelease(); }
+function touchStarted() { handlePress(); return false; }
+function touchEnded() { handleRelease(); return false; }
 
 function handlePress() {
   if (presenceButton.isVisible && !isHoldingButton && !presenceButton.isOnCooldown && presenceButton.isFullyDrawn) {
     let d = dist(mouseX, mouseY, presenceButton.pos.x, presenceButton.pos.y);
     if (d < presenceButton.currentSize / 2) {
-      isHoldingButton = true;
-      holdStartTime = millis();
-      textPoints = [];
-      textAnimation.isAnimating = false;
+      isHoldingButton = true; holdStartTime = millis(); textPoints = []; textAnimation.isAnimating = false;
     }
   }
 }
@@ -321,24 +477,21 @@ function handleRelease() {
     isHoldingButton = false;
     let holdDuration = min(millis() - holdStartTime, MAX_HOLD_TIME);
     startTextAnimation(holdDuration);
-    presenceButton.isOnCooldown = true;
-    presenceButton.cooldownStartTime = millis();
+    presenceButton.isOnCooldown = true; presenceButton.cooldownStartTime = millis();
   }
 }
 
 // ---- TEXT ANIMATION FUNCTIONS ----
 function startTextAnimation(holdDuration) {
-  const currentMessage = random(MESSAGES);
+  const currentMessage = random(loadedMessages);
   const bounds = font.textBounds(currentMessage, 0, 0, TEXT_FONT_SIZE);
-  const x = width / 2 - bounds.w / 2,
-    y = height / 3 + bounds.h / 2;
-  textPoints = font.textToPoints(currentMessage, x, y, TEXT_FONT_SIZE, {
-    sampleFactor: 0.1,
-    simplifyThreshold: 0
-  });
+  
+  const x = width / 2 - bounds.w / 2;
+  const y = height / 2 - 30;
+  
+  textPoints = font.textToPoints(currentMessage, x, y, TEXT_FONT_SIZE, { sampleFactor: 0.1, simplifyThreshold: 0 });
   textAnimation.duration = map(holdDuration, 0, MAX_HOLD_TIME, TEXT_ANIM_MIN_DURATION, TEXT_ANIM_MAX_DURATION);
-  textAnimation.startTime = millis();
-  textAnimation.isAnimating = true;
+  textAnimation.startTime = millis(); textAnimation.isAnimating = true;
 }
 
 function updateAndDrawText() {
@@ -346,76 +499,64 @@ function updateAndDrawText() {
   textGlowBuffer.clear();
   let progress = 1.0;
   if (textAnimation.isAnimating) {
-    progress = constrain((millis() - textAnimation.startTime) / textAnimation.duration, 0, 1);
+    progress = constrain((millis()-textAnimation.startTime)/textAnimation.duration, 0, 1);
     if (progress >= 1) textAnimation.isAnimating = false;
   }
   const pointsToDraw = floor(progress * textPoints.length);
   const time = millis() * TEXT_BREATHING_SPEED;
+  
   textGlowBuffer.noStroke();
-  textGlowBuffer.fill(0, 0, 0, TEXT_OPACITY);
+  textGlowBuffer.fill(hue(textColor), saturation(textColor), brightness(textColor), TEXT_OPACITY);
+
   for (let i = 0; i < pointsToDraw; i++) {
     const p = textPoints[i];
     if (i > 0) {
-      const prev = textPoints[i - 1];
-      if (dist(prev.x, prev.y, p.x, p.y) > TEXT_FONT_SIZE * 0.5) continue;
+      const prev = textPoints[i-1];
+      if (dist(prev.x, prev.y, p.x, p.y) > TEXT_FONT_SIZE*0.5) continue;
     }
     const noiseValue = noise(i * 0.1, time);
     const currentDotSize = map(noiseValue, 0, 1, TEXT_BREATHING_MIN_SIZE, TEXT_BREATHING_MAX_SIZE);
     textGlowBuffer.circle(p.x, p.y, currentDotSize);
   }
+  
   push();
-  drawingContext.filter = `blur(${TEXT_GLOW_BLUR}px)`;
+  blendMode(DIFFERENCE);
   image(textGlowBuffer, 0, 0);
-  drawingContext.filter = 'none';
-  image(textGlowBuffer, 0, 0);
-  pop();
+  pop(); 
 }
 
 // ---- PRESENCE BUTTON FUNCTIONS ----
 function setupButton() {
   presenceButton = {
-    pos: createVector(width / 2, height * 3 / 4),
-    size: BUTTON_SIZE,
-    isVisible: false,
-    lastActiveTime: 0,
-    currentAlpha: 0,
-    targetAlpha: 0,
-    currentSize: BUTTON_SIZE,
-    targetSize: BUTTON_SIZE,
-    isOnCooldown: false,
-    cooldownStartTime: 0,
-    drawProgress: 0,
-    isFullyDrawn: false
+    pos: createVector(width/2, height*3/4), size: BUTTON_SIZE, isVisible: false, lastActiveTime: 0,
+    currentAlpha: 0, targetAlpha: 0, currentSize: BUTTON_SIZE, targetSize: BUTTON_SIZE,
+    isOnCooldown: false, cooldownStartTime: 0, drawProgress: 0, isFullyDrawn: false
   };
 }
 
 function updateButton() {
   const now = millis();
-  if (presenceButton.isOnCooldown && now > presenceButton.cooldownStartTime + BUTTON_COOLDOWN_DURATION) {
+  if (presenceButton.isOnCooldown && now > presenceButton.cooldownStartTime+BUTTON_COOLDOWN_DURATION) {
     presenceButton.isOnCooldown = false;
   }
   if (isHoldingButton) {
-    presenceButton.targetSize = BUTTON_SIZE * BUTTON_GROW_FACTOR;
-    presenceButton.targetAlpha = 100;
+    presenceButton.targetSize = BUTTON_SIZE * BUTTON_GROW_FACTOR; presenceButton.targetAlpha = 100;
   } else if (presenceButton.isOnCooldown) {
-    presenceButton.targetAlpha = 0;
-    presenceButton.targetSize = BUTTON_SIZE;
+    presenceButton.targetAlpha = 0; presenceButton.targetSize = BUTTON_SIZE;
   } else {
     presenceButton.targetSize = BUTTON_SIZE;
-    if (presenceButton.isVisible && now > presenceButton.lastActiveTime + BUTTON_VISIBILITY_TIMEOUT) {
+    if (presenceButton.isVisible && now > presenceButton.lastActiveTime+BUTTON_VISIBILITY_TIMEOUT) {
       presenceButton.isVisible = false;
     }
     presenceButton.targetAlpha = presenceButton.isVisible ? 100 : 0;
   }
   presenceButton.currentAlpha = lerp(presenceButton.currentAlpha, presenceButton.targetAlpha, BUTTON_FADE_SPEED);
   presenceButton.currentSize = lerp(presenceButton.currentSize, presenceButton.targetSize, BUTTON_GROW_SPEED);
-
   if (presenceButton.targetAlpha > 0 && !presenceButton.isFullyDrawn) {
     presenceButton.drawProgress = min(1, presenceButton.drawProgress + BUTTON_DRAW_SPEED);
     if (presenceButton.drawProgress >= 1) presenceButton.isFullyDrawn = true;
   } else if (presenceButton.targetAlpha === 0) {
-    presenceButton.drawProgress = 0;
-    presenceButton.isFullyDrawn = false;
+    presenceButton.drawProgress = 0; presenceButton.isFullyDrawn = false;
   }
 }
 
@@ -423,16 +564,11 @@ function drawButton() {
   if (presenceButton.currentAlpha < 1) return;
   push();
   let overallAlpha = presenceButton.currentAlpha;
-
-  strokeWeight(BUTTON_STROKE_WEIGHT);
-  stroke(0, 0, 0, 80 * (overallAlpha / 100));
-  noFill();
+  strokeWeight(BUTTON_STROKE_WEIGHT); stroke(0, 0, 0, 80*(overallAlpha/100)); noFill();
   let endAngle = -HALF_PI + presenceButton.drawProgress * TWO_PI;
   arc(presenceButton.pos.x, presenceButton.pos.y, presenceButton.currentSize, presenceButton.currentSize, -HALF_PI, endAngle);
-
   if (presenceButton.isFullyDrawn) {
-    noStroke();
-    fill(0, 0, 0, 5 * (overallAlpha / 100));
+    noStroke(); fill(0, 0, 0, 5 * (overallAlpha/100));
     circle(presenceButton.pos.x, presenceButton.pos.y, presenceButton.currentSize);
   }
   pop();
@@ -440,6 +576,7 @@ function drawButton() {
 
 // ---- OPTIMIZED GRAIN FUNCTION ----
 function createGrainTexture() {
+  if (GRAIN_AMOUNT <= 0) return;
   grainBuffer = createGraphics(width, height);
   let numParticles = (width * height / 100) * GRAIN_AMOUNT;
   grainBuffer.strokeWeight(1.5);
@@ -450,10 +587,9 @@ function createGrainTexture() {
 }
 
 function applyGrain() {
-  if (GRAIN_AMOUNT <= 0) return;
+  if (GRAIN_AMOUNT <= 0 || !grainBuffer) return;
   push();
-  blendMode(MULTIPLY);
-  tint(255, 50);
+  blendMode(MULTIPLY); tint(255, 50);
   image(grainBuffer, 0, 0);
   pop();
 }
@@ -463,23 +599,19 @@ function detectMotion() {
   let motionCount = 0;
   capture.loadPixels();
   if (capture.pixels.length === 0) return 0;
-
   if (previousFrame.width !== capture.width || previousFrame.height !== capture.height) {
-    previousFrame = createGraphics(capture.width, capture.height);
-    previousFrame.pixelDensity(1);
+    previousFrame = createGraphics(capture.width, capture.height); previousFrame.pixelDensity(1);
   }
-
   previousFrame.loadPixels();
   if (previousFrame.pixels.length === 0) {
     previousFrame.drawingContext.drawImage(capture.elt, 0, 0, previousFrame.width, previousFrame.height);
     return 0;
   }
-
-  for (let y = 0; y < capture.height; y += MOTION_DETECT_STEP) {
-    for (let x = 0; x < capture.width; x += MOTION_DETECT_STEP) {
+  for (let y = 0; y < capture.height; y+=MOTION_DETECT_STEP) {
+    for (let x = 0; x < capture.width; x+=MOTION_DETECT_STEP) {
       const i = (x + y * capture.width) * 4;
-      const d = dist(capture.pixels[i], capture.pixels[i + 1], capture.pixels[i + 2],
-        previousFrame.pixels[i], previousFrame.pixels[i + 1], previousFrame.pixels[i + 2]);
+      const d = dist(capture.pixels[i], capture.pixels[i+1], capture.pixels[i+2],
+        previousFrame.pixels[i], previousFrame.pixels[i+1], previousFrame.pixels[i+2]);
       if (d > motionSensitivityThreshold) motionCount++;
     }
   }
@@ -489,9 +621,6 @@ function detectMotion() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  setupGraphics();
-  setupButton();
-  textPoints = [];
-  splashes = [];
-  textAnimation.isAnimating = false;
+  setupGraphics(); setupButton();
+  textPoints = []; activeEffects = []; textAnimation.isAnimating = false;
 }
