@@ -36,7 +36,7 @@ const SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ0mNWV
 const FONT_PATH = 'PlaywriteDKUloopet-Thin.ttf';
 
 // --- SENSITIVITY CONTROL ---
-const sensitivity = 1;
+const sensitivity = 0.2;
 
 // --- PERFORMANCE CONTROLS ---
 const MOTION_DETECT_STEP = 6;
@@ -44,48 +44,37 @@ const MOTION_DETECT_STEP = 6;
 // --- PAINTERLY BACKGROUND CONTROLS ---
 const NUM_BG_BRUSHES = 4;
 const BG_BRUSH_SPEED = 0.0005;
-const BG_STROKE_DENSITY = 15;
+const BG_STROKE_DENSITY = 10;
 const BG_STROKE_RADIUS = 60;
-const BACKGROUND_DECAY_ALPHA = 0.4;
+const BACKGROUND_DECAY_ALPHA = 1;
 const BG_BRUSH_TRAVEL_MARGIN = 0.2;
 
 // --- EFFECT CONTROLS ---
 const EFFECT_TYPES = ['swarm', 'dotBurst', 'flowerBurst'];
-// Swarm Controls
 const SWARM_DRAW_DURATION = 1000, SWARM_HOLD_DURATION = 10000, SWARM_FADE_DURATION = 3000;
 const SWARM_TOTAL_LIFESPAN = SWARM_DRAW_DURATION + SWARM_HOLD_DURATION + SWARM_FADE_DURATION;
-const NUM_STROKES_IN_SWARM = 3, SWARM_SPREAD = 50, STROKE_SEGMENTS = 60;
+const NUM_STROKES_IN_SWARM = 4, SWARM_SPREAD = 20, STROKE_SEGMENTS = 60;
 const STROKE_MIN_WEIGHT = 2, STROKE_MAX_WEIGHT = 16;
 const SWARM_MIN_DISTANCE = 150, SWARM_MAX_DISTANCE = 1800;
-// Dot & Flower Burst Common Lifespan
-const BURST_DRAW_DURATION = 500;
-const BURST_HOLD_DURATION = 10000;
-const BURST_FADE_DURATION = 3000;
+const BURST_DRAW_DURATION = 500, BURST_HOLD_DURATION = 10000, BURST_FADE_DURATION = 3000;
 const BURST_TOTAL_LIFESPAN = BURST_DRAW_DURATION + BURST_HOLD_DURATION + BURST_FADE_DURATION;
-// Dot Burst Controls
-const DOT_BURST_COUNT = 25;
-const DOT_BURST_MIN_SPEED = 0.6;
-const DOT_BURST_MAX_SPEED = 5;
-const DOT_BURST_MIN_SIZE = 5;
-const DOT_BURST_MAX_SIZE = 15;
-// Flower Burst Controls
-const FLOWER_BURST_COUNT = 60;
-const FLOWER_PETAL_COUNT = 5;
-const FLOWER_PETAL_SPREAD = 0.4; 
-const FLOWER_BURST_MIN_SPEED = 0.5;
-const FLOWER_BURST_MAX_SPEED = 2.0;
-const FLOWER_BURST_MIN_SIZE = 4;
-const FLOWER_BURST_MAX_SIZE = 12;
+const DOT_BURST_COUNT = 25, DOT_BURST_MIN_SPEED = 0.6, DOT_BURST_MAX_SPEED = 5;
+const DOT_BURST_MIN_SIZE = 5, DOT_BURST_MAX_SIZE = 15;
+const FLOWER_BURST_COUNT = 60, FLOWER_PETAL_COUNT = 5, FLOWER_PETAL_SPREAD = 0.4; 
+const FLOWER_BURST_MIN_SPEED = 0.5, FLOWER_BURST_MAX_SPEED = 2.0;
+const FLOWER_BURST_MIN_SIZE = 4, FLOWER_BURST_MAX_SIZE = 12;
 
 // --- BUTTON CONTROL ---
-const BUTTON_VISIBILITY_TIMEOUT = 12000, BUTTON_SIZE = 80, BUTTON_FADE_SPEED = 0.05, MAX_HOLD_TIME = 3000;
+const BUTTON_VISIBILITY_TIMEOUT = 12000, BUTTON_SIZE = 60, BUTTON_FADE_SPEED = 0.05, MAX_HOLD_TIME = 3000;
 const BUTTON_COOLDOWN_DURATION = 4000, BUTTON_GROW_SPEED = 0.2, BUTTON_GROW_FACTOR = 1.5;
-const BUTTON_DRAW_SPEED = 0.04, BUTTON_STROKE_WEIGHT = 3;
+const BUTTON_DRAW_SPEED = 0.04, BUTTON_STROKE_WEIGHT = 1;
 
 // --- TEXT & MESSAGE CONTROL ---
-const TEXT_FONT_SIZE = 96, TEXT_OPACITY = 100;
-const TEXT_BREATHING_MIN_SIZE = 6, TEXT_BREATHING_MAX_SIZE = 10;
-const TEXT_BREATHING_SPEED = 0.002, TEXT_ANIM_MIN_DURATION = 1500, TEXT_ANIM_MAX_DURATION = 4000;
+const TEXT_FONT_SIZE = 48, TEXT_OPACITY = 60;
+const TEXT_SAMPLE_FACTOR = 0.45;
+const TEXT_BREATHING_MIN_SIZE = 2.5;
+const TEXT_BREATHING_MAX_SIZE = 4.0;
+const TEXT_ANIM_MIN_DURATION = 1500, TEXT_ANIM_MAX_DURATION = 4000;
 
 // --- VISUAL EFFECTS ---
 const GRAIN_AMOUNT = 0;
@@ -93,7 +82,7 @@ const GRAIN_AMOUNT = 0;
 // --- Internal Tuning Parameters ---
 let motionSensitivityThreshold, activationThreshold;
 let motionEnergy = 0, lastMotionTriggerTime = 0;
-const MOTION_TRIGGER_COOLDOWN = 1000;
+const MOTION_TRIGGER_COOLDOWN = 300;
 
 
 // --- EMBEDDED P5.BRUSH LIBRARY LOGIC ---
@@ -196,8 +185,12 @@ function setupGraphics() {
   mainSwarmsColor = color('#FF5017');
   const secondColor = color('#062DEC');
   const otherColors = [
-      color(45, 80, 100), color(340, 70, 100), color(260, 75, 100),
-      color(190, 80, 100), color(170, 70, 90), color(320, 70, 90)
+      color(45, 80, 100),
+      color(340, 70, 100),
+      color(260, 75, 100),
+      color(190, 80, 100),
+      color(170, 70, 90),
+      color(320, 70, 90)
   ];
   
   strokeColorPalette = [];
@@ -303,7 +296,7 @@ function createStrokeSwarm() {
   swarm.buffer.colorMode(HSB, 360, 100, 100, 100);
   swarm.buffer.noStroke();
 
-  const start = createVector(random(width), random(height));
+  const start = createVector(randomGaussian(width / 2, width / 4), randomGaussian(height / 2, height / 4));
   const travelDistance = random(SWARM_MIN_DISTANCE, SWARM_MAX_DISTANCE);
   const travelVector = swarmDirection.copy().mult(travelDistance);
   const end = p5.Vector.add(start, travelVector);
@@ -343,7 +336,7 @@ function createDotBurst() {
         isDead: function() { return millis() > this.creationTime + BURST_TOTAL_LIFESPAN; }
     };
     burst.buffer.colorMode(HSB, 360, 100, 100, 100);
-    const center = createVector(random(width), random(height));
+    const center = createVector(randomGaussian(width / 2, width / 5), randomGaussian(height / 2, height / 5));
     for (let i = 0; i < DOT_BURST_COUNT; i++) {
         burst.particles.push({
             pos: center.copy(),
@@ -362,7 +355,7 @@ function createFlowerBurst() {
         isDead: function() { return millis() > this.creationTime + BURST_TOTAL_LIFESPAN; }
     };
     burst.buffer.colorMode(HSB, 360, 100, 100, 100);
-    const center = createVector(random(width), random(height));
+    const center = createVector(randomGaussian(width / 2, width / 5), randomGaussian(height / 2, height / 5));
     for (let i = 0; i < FLOWER_BURST_COUNT; i++) {
         const petalIndex = i % FLOWER_PETAL_COUNT;
         const centerAngle = petalIndex * (TWO_PI / FLOWER_PETAL_COUNT);
@@ -385,8 +378,8 @@ function updateAndDrawEffects() {
   for (const effect of activeEffects) {
     switch(effect.type) {
       case 'swarm': updateAndDrawSwarm(effect); break;
-      case 'dotBurst': updateAndDrawBurst(effect); break;
-      case 'flowerBurst': updateAndDrawBurst(effect); break;
+      case 'dotBurst': updateAndDrawDotBurst(effect); break;
+      case 'flowerBurst': updateAndDrawDotBurst(effect); break;
     }
   }
   blendMode(BLEND);
@@ -427,7 +420,7 @@ function updateAndDrawSwarm(swarm) {
     pop();
 }
 
-function updateAndDrawBurst(burst) {
+function updateAndDrawDotBurst(burst) {
     const age = millis() - burst.creationTime;
     let alpha = 100;
     
@@ -484,12 +477,26 @@ function handleRelease() {
 // ---- TEXT ANIMATION FUNCTIONS ----
 function startTextAnimation(holdDuration) {
   const currentMessage = random(loadedMessages);
-  const bounds = font.textBounds(currentMessage, 0, 0, TEXT_FONT_SIZE);
   
-  const x = width / 2 - bounds.w / 2;
+  textPoints = font.textToPoints(currentMessage, 0, 0, TEXT_FONT_SIZE, { 
+      sampleFactor: TEXT_SAMPLE_FACTOR, 
+      simplifyThreshold: 0 
+  });
+  
+  let minX = Infinity, maxX = -Infinity;
+  for(let p of textPoints) {
+    if(p.x < minX) minX = p.x;
+    if(p.x > maxX) maxX = p.x;
+  }
+  const textW = maxX - minX;
+
+  const x = width / 2 - textW / 2;
   const y = height / 2 - 30;
+  textPoints = font.textToPoints(currentMessage, x, y, TEXT_FONT_SIZE, { 
+      sampleFactor: TEXT_SAMPLE_FACTOR, 
+      simplifyThreshold: 0 
+  });
   
-  textPoints = font.textToPoints(currentMessage, x, y, TEXT_FONT_SIZE, { sampleFactor: 0.1, simplifyThreshold: 0 });
   textAnimation.duration = map(holdDuration, 0, MAX_HOLD_TIME, TEXT_ANIM_MIN_DURATION, TEXT_ANIM_MAX_DURATION);
   textAnimation.startTime = millis(); textAnimation.isAnimating = true;
 }
@@ -503,20 +510,25 @@ function updateAndDrawText() {
     if (progress >= 1) textAnimation.isAnimating = false;
   }
   const pointsToDraw = floor(progress * textPoints.length);
-  const time = millis() * TEXT_BREATHING_SPEED;
   
   textGlowBuffer.noStroke();
   textGlowBuffer.fill(hue(textColor), saturation(textColor), brightness(textColor), TEXT_OPACITY);
 
   for (let i = 0; i < pointsToDraw; i++) {
     const p = textPoints[i];
-    if (i > 0) {
-      const prev = textPoints[i-1];
-      if (dist(prev.x, prev.y, p.x, p.y) > TEXT_FONT_SIZE*0.5) continue;
-    }
-    const noiseValue = noise(i * 0.1, time);
+    
+    textGlowBuffer.push();
+    textGlowBuffer.translate(p.x, p.y);
+    
+    const angle = map(noise(i * 0.05, millis() * 0.0005), 0, 1, -QUARTER_PI, QUARTER_PI);
+    textGlowBuffer.rotate(angle);
+    
+    // SỬA LỖI: Bỏ đi biến không tồn tại
+    const noiseValue = noise(i * 0.1, millis() * 0.002);
     const currentDotSize = map(noiseValue, 0, 1, TEXT_BREATHING_MIN_SIZE, TEXT_BREATHING_MAX_SIZE);
-    textGlowBuffer.circle(p.x, p.y, currentDotSize);
+    
+    textGlowBuffer.ellipse(0, 0, currentDotSize * 1.5, currentDotSize);
+    textGlowBuffer.pop();
   }
   
   push();
